@@ -1,0 +1,37 @@
+name: Schedule runner
+
+on:
+  workflow_call:
+    outputs:
+      runner-label:
+        description: Selected worker label.
+        value: ${{ jobs.schedule.outputs.runner-label }}
+
+permissions:
+  contents: read
+
+jobs:
+  schedule:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, corioders-self-hosted-scheduler]
+    timeout-minutes: 5
+    outputs:
+      runner-label: ${{ steps.schedule.outputs.runner-label }}
+    steps:
+      - id: schedule
+        name: Reserve runner target
+        shell: bash
+        run: |
+          set -euo pipefail
+          targets=/etc/corioders-runner/targets.json
+          if [[ ! -r "$targets" ]]; then
+            targets="$HOME/.config/corioders-runner/targets.json"
+          fi
+          corioders-runner-scheduler schedule \
+            --targets "$targets" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --repository "$GITHUB_REPOSITORY" \
+            --event-name "$GITHUB_EVENT_NAME" \
+            --event-path "$GITHUB_EVENT_PATH" \
+            --github-output "$GITHUB_OUTPUT"
