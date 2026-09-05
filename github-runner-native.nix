@@ -75,7 +75,8 @@ in
           runner_group_id=1
         ''}
 
-        runner_name=${lib.escapeShellArg namePrefix}-"$(date -u +%Y%m%d-%H%M%S)"-"$$"
+        runner_name_prefix=${lib.escapeShellArg namePrefix}
+        runner_name="''${runner_name_prefix:0:32}-$(date -u +%Y%m%d-%H%M%S)-$$"
         jit_response="$(
           jq --compact-output --null-input \
             --arg name "$runner_name" \
