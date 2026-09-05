@@ -9,6 +9,16 @@ let
   scheduler = pkgs.callPackage ./scheduler/package.nix { };
   workerPackage = pkgs.callPackage ./worker/package.nix { };
   nativeRunner = import ./github-runner-native.nix { inherit lib pkgs; };
+  darwinRunnerArchive = pkgs.fetchurl {
+    url = "https://github.com/actions/runner/releases/download/v2.336.0/actions-runner-osx-arm64-2.336.0.tar.gz";
+    hash = "sha256-jog5xJtwYLayFU9JMfgV3zMMJ/Fn1T7yI57j384osHk=";
+  };
+  darwinRunnerPackage = pkgs.runCommand "github-actions-runner-osx-arm64-2.336.0" { } ''
+    mkdir -p "$out"
+    ${pkgs.gnutar}/bin/tar -xzf ${darwinRunnerArchive} -C "$out"
+  '';
+  defaultRunnerPackage =
+    if pkgs.stdenv.hostPlatform.isDarwin then darwinRunnerPackage else pkgs.github-runner;
   label = "corioders-worker-${cfg.name}";
   platformLabel = if pkgs.stdenv.hostPlatform.isDarwin then "macOS" else "Linux";
   architectureLabel = if pkgs.stdenv.hostPlatform.isAarch64 then "ARM64" else "X64";
@@ -93,8 +103,8 @@ in
     };
     runnerPackage = lib.mkOption {
       type = lib.types.package;
-      default = pkgs.github-runner;
-      defaultText = lib.literalExpression "pkgs.github-runner";
+      default = defaultRunnerPackage;
+      defaultText = lib.literalExpression "the official GitHub runner archive on Darwin, pkgs.github-runner on Linux";
       description = "GitHub Actions runner package.";
     };
     schedulerPublicKey = lib.mkOption {
