@@ -61,6 +61,9 @@ or start a worker:
 nix profile install github:corioders/nix-runner-worker
 ```
 
+The scheduler core is also exported separately as
+`packages.<system>.corioders-runner-scheduler` for trusted scheduler hosts.
+
 Enrollment and priority remain central. The scheduler administrator adds the
 host to their target list and assigns its priority; the worker cannot advertise
 or change it.

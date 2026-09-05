@@ -69,6 +69,7 @@
         in
         {
           default = pkgs.callPackage ./worker/package.nix { };
+          corioders-runner-scheduler = pkgs.callPackage ./scheduler/package.nix { };
           corioders-runner-worker = pkgs.callPackage ./worker/package.nix { };
         }
       );
