@@ -18,12 +18,12 @@
       ...
     }:
     let
-      systems = [
+      workerSystems = [
         "aarch64-darwin"
         "aarch64-linux"
         "x86_64-linux"
       ];
-      forAllSystems = nixpkgs.lib.genAttrs systems;
+      schedulerSystems = workerSystems ++ [ "x86_64-darwin" ];
       pkgsFor =
         system: import (if system == "aarch64-darwin" then nixpkgs-darwin else nixpkgs) { inherit system; };
       moduleCheck =
@@ -62,19 +62,21 @@
         corioders-runner-worker = import ./module.nix;
       };
 
-      packages = forAllSystems (
+      packages = nixpkgs.lib.genAttrs schedulerSystems (
         system:
         let
           pkgs = pkgsFor system;
         in
         {
-          default = pkgs.callPackage ./worker/package.nix { };
           corioders-runner-scheduler = pkgs.callPackage ./scheduler/package.nix { };
+        }
+        // nixpkgs.lib.optionalAttrs (builtins.elem system workerSystems) {
+          default = pkgs.callPackage ./worker/package.nix { };
           corioders-runner-worker = pkgs.callPackage ./worker/package.nix { };
         }
       );
 
-      checks = forAllSystems (
+      checks = nixpkgs.lib.genAttrs workerSystems (
         system:
         let
           pkgs = pkgsFor system;
