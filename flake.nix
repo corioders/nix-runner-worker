@@ -50,7 +50,13 @@
                 name = "test-worker";
                 runnerPackage = fakeRunner;
                 schedulerPublicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITest corioders-runner-scheduler";
-                scopes.corioders.tokenFile = "/run/secrets/github-token";
+                scopes = {
+                  corioders.tokenFile = "/run/secrets/github-token";
+                  example = {
+                    repository = "corioders/example";
+                    tokenFile = "/run/secrets/github-token";
+                  };
+                };
               };
             }
           ];

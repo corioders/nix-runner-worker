@@ -47,11 +47,10 @@ let
       jobStartedHook = "${jobStartedHook}/bin/corioders-external-worker-job-started";
     }
   ) cfg.scopes;
-  workerPoolArguments = lib.concatStringsSep " \
-      " (
+  workerPoolArguments = lib.concatStringsSep "\n" (
     lib.mapAttrsToList (
       scope: command:
-      "--scope-command ${lib.escapeShellArg "${scope}=${command}/bin/github-runner-external-${cfg.name}-${scope}"}"
+      "scope_arguments+=(--scope-command ${lib.escapeShellArg "${scope}=${command}/bin/github-runner-external-${cfg.name}-${scope}"})"
     ) workerCommands
   );
   workerService = pkgs.writeShellApplication {
@@ -61,8 +60,9 @@ let
       export CORIODERS_RUNNER_STATE_DIR=${lib.escapeShellArg cfg.stateDirectory}
       export CORIODERS_RUNNER_CAPACITY=${toString cfg.capacity}
       export CORIODERS_RUNNER_LEASE_TTL=${toString cfg.leaseTtlSeconds}
-      exec corioders-runner-worker-pool \
-        ${workerPoolArguments}
+      scope_arguments=()
+      ${workerPoolArguments}
+      exec corioders-runner-worker-pool "''${scope_arguments[@]}"
     '';
   };
   target = pkgs.writeShellApplication {
