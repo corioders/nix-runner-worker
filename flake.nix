@@ -88,6 +88,13 @@
                 python -m unittest discover -s ${./scheduler}
                 touch "$out"
               '';
+          shell = pkgs.runCommand "corioders-runner-shell-tests" { nativeBuildInputs = [ pkgs.bash ]; } ''
+            for script in ${./scheduler}/*.sh; do
+              bash -n "$script"
+              test -x "$script"
+            done
+            touch "$out"
+          '';
           quality =
             pkgs.runCommand "corioders-runner-quality"
               {
