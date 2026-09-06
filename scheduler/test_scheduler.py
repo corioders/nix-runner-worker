@@ -5,6 +5,7 @@ import pathlib
 import signal
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from unittest import mock
 
 
@@ -15,6 +16,33 @@ SPEC.loader.exec_module(scheduler)
 
 
 class SchedulerTest(unittest.TestCase):
+    @mock.patch.object(scheduler, "github_pages")
+    def test_stuck_dynamic_run_requires_missing_online_label(self, pages):
+        created_at = datetime.fromtimestamp(100, timezone.utc).isoformat()
+        pages.side_effect = [
+            [{"status": "online", "labels": [{"name": "worker-other"}]}],
+            [{"full_name": "corioders/app"}],
+            [{"id": 10, "run_attempt": 1, "created_at": created_at, "jobs_url": "jobs"}],
+            [{"status": "queued", "labels": ["self-hosted", "corioders-worker-vu-compute-3"]}],
+        ]
+
+        self.assertEqual(
+            [("corioders/app", 10)],
+            [(repository, run["id"]) for repository, run in scheduler.stuck_dynamic_runs("token", "corioders", 600, now=1000)],
+        )
+
+    @mock.patch.object(scheduler, "github_pages")
+    def test_online_dynamic_label_is_not_rescued(self, pages):
+        created_at = datetime.fromtimestamp(100, timezone.utc).isoformat()
+        pages.side_effect = [
+            [{"status": "online", "labels": [{"name": "corioders-worker-vu-compute-3"}]}],
+            [{"full_name": "corioders/app"}],
+            [{"id": 10, "run_attempt": 1, "created_at": created_at, "jobs_url": "jobs"}],
+            [{"status": "queued", "labels": ["corioders-worker-vu-compute-3"]}],
+        ]
+
+        self.assertEqual([], list(scheduler.stuck_dynamic_runs("token", "corioders", 600, now=1000)))
+
     def test_stop_workers_terminates_process_groups(self):
         running = mock.Mock()
         running.pid = 123

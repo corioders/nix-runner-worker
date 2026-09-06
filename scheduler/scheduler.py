@@ -13,12 +13,17 @@ import signal
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from datetime import datetime, timezone
 
 
 DEFAULT_LEASE_TTL_SECONDS = 900
 DEFAULT_RETRY_INTERVAL_SECONDS = 5
 DEFAULT_TARGET_CAPACITY = 20
 DEFAULT_WAIT_TIMEOUT_SECONDS = 240
+DEFAULT_STUCK_JOB_AGE_SECONDS = 600
 REPOSITORY_SCOPES = {
     "poland2-0/poland20": "poland20",
     "watjurk/wjsetup": "watjurk-wjsetup",
@@ -33,6 +38,93 @@ def fail(message):
 def read_json(path):
     with open(path, encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def github_request(token, url, method="GET"):
+    request = urllib.request.Request(
+        url,
+        method=method,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {token}",
+            "X-GitHub-Api-Version": "2026-03-10",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            body = response.read()
+    except urllib.error.HTTPError as error:
+        if method == "POST" and error.code in {409, 422}:
+            return None
+        raise
+    return json.loads(body) if body else None
+
+
+def github_pages(token, url, key=None):
+    page = 1
+    while True:
+        separator = "&" if "?" in url else "?"
+        payload = github_request(token, f"{url}{separator}per_page=100&page={page}")
+        items = payload[key] if key else payload
+        yield from items
+        if len(items) < 100:
+            return
+        page += 1
+
+
+def parse_github_timestamp(value):
+    return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+
+
+def stuck_dynamic_runs(token, organization, minimum_age, now=None):
+    now = time.time() if now is None else now
+    runners = github_pages(
+        token, f"https://api.github.com/orgs/{organization}/actions/runners", "runners"
+    )
+    online_labels = {
+        label["name"]
+        for runner in runners
+        if runner["status"] == "online"
+        for label in runner["labels"]
+    }
+    repositories = github_pages(
+        token, f"https://api.github.com/orgs/{organization}/repos?type=all"
+    )
+    for repository in repositories:
+        full_name = repository["full_name"]
+        runs = github_pages(
+            token,
+            f"https://api.github.com/repos/{full_name}/actions/runs?status=queued",
+            "workflow_runs",
+        )
+        for run in runs:
+            if now - parse_github_timestamp(run["created_at"]) < minimum_age:
+                continue
+            jobs = github_pages(token, run["jobs_url"] + "?filter=latest", "jobs")
+            for job in jobs:
+                requested = {
+                    label
+                    for label in job.get("labels", [])
+                    if label.startswith("corioders-worker-")
+                }
+                if job["status"] == "queued" and requested - online_labels:
+                    yield full_name, run
+                    break
+
+
+def rescue_run(token, repository, run, wait_timeout=60):
+    run_url = f"https://api.github.com/repos/{repository}/actions/runs/{run['id']}"
+    github_request(token, run_url + "/cancel", method="POST")
+    deadline = time.monotonic() + wait_timeout
+    while time.monotonic() < deadline:
+        current = github_request(token, run_url)
+        if current["run_attempt"] != run["run_attempt"]:
+            return False
+        if current["status"] == "completed":
+            github_request(token, run_url + "/rerun", method="POST")
+            return True
+        time.sleep(2)
+    return False
 
 
 def validate_event(event_name, event_path):
@@ -506,6 +598,20 @@ def command_validate_event(arguments):
     validate_event(arguments.event_name, arguments.event_path)
 
 
+def command_rescue_stuck_jobs(arguments):
+    token = pathlib.Path(arguments.token_file).read_text(encoding="utf-8").strip()
+    if not token:
+        fail(f"GitHub API token is missing: {arguments.token_file}")
+    rescued = 0
+    for repository, run in stuck_dynamic_runs(
+        token, arguments.organization, arguments.minimum_age
+    ):
+        if rescue_run(token, repository, run, arguments.wait_timeout):
+            rescued += 1
+            print(f"rescued {repository} run {run['id']} attempt {run['run_attempt']}")
+    return rescued
+
+
 def command_serve_ssh(_arguments):
     original_command = os.environ.get("SSH_ORIGINAL_COMMAND", "")
     try:
@@ -601,6 +707,15 @@ def parser():
     validate_event_parser.add_argument("--event-name", required=True)
     validate_event_parser.add_argument("--event-path", required=True)
     validate_event_parser.set_defaults(function=command_validate_event)
+
+    rescue = commands.add_parser("rescue-stuck-jobs")
+    rescue.add_argument("--organization", required=True)
+    rescue.add_argument("--token-file", required=True)
+    rescue.add_argument(
+        "--minimum-age", type=int, default=DEFAULT_STUCK_JOB_AGE_SECONDS
+    )
+    rescue.add_argument("--wait-timeout", type=int, default=60)
+    rescue.set_defaults(function=command_rescue_stuck_jobs)
 
     serve_ssh = commands.add_parser("serve-ssh")
     serve_ssh.set_defaults(function=command_serve_ssh)
